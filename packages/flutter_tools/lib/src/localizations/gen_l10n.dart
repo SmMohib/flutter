@@ -201,7 +201,11 @@ Map<String, String> pluralCases = <String, String>{
 };
 
 String generateBaseClassMethod(Message message, LocaleInfo? templateArbLocale) {
-  final String comment = message.description ?? 'No description provided for @${message.resourceId}.';
+  final String comment = message
+    .description
+    ?.split('\n')
+    .map((String line) => '  /// $line')
+    .join('\n') ?? '  /// No description provided for @${message.resourceId}.';
   final String templateLocaleTranslationComment = '''
   /// In $templateArbLocale, this message translates to:
   /// **'${generateString(message.value)}'**''';
@@ -613,8 +617,7 @@ class LocalizationsGenerator {
   /// locales, the difference is negligible, and might slow down the start up
   /// compared to bundling the localizations with the rest of the application.
   ///
-  /// Note that this flag does not affect other platforms such as mobile or
-  /// desktop.
+  /// This flag does not affect other platforms such as mobile or desktop.
   final bool useDeferredLoading;
 
   /// Contains a map of each output language file to its corresponding content in
@@ -623,7 +626,6 @@ class LocalizationsGenerator {
 
   /// A generated file that will contain the list of messages for each locale
   /// that do not have a translation yet.
-  @visibleForTesting
   final File? untranslatedMessagesFile;
 
   /// The file that contains the list of inputs and outputs for generating
@@ -820,7 +822,7 @@ class LocalizationsGenerator {
     if (untranslatedMessagesFileString == null || untranslatedMessagesFileString.isEmpty) {
       return null;
     }
-
+    untranslatedMessagesFileString = untranslatedMessagesFileString.replaceAll(r'\', fileSystem.path.separator);
     return fileSystem.file(untranslatedMessagesFileString);
   }
 
@@ -842,15 +844,15 @@ class LocalizationsGenerator {
     if (name[0] == '_') {
       return false;
     }
-    // Dart getter and method name cannot contain non-alphanumeric symbols
-    if (name.contains(RegExp(r'[^a-zA-Z_\d]'))) {
+    // Dart identifiers can only use letters, numbers, underscores, and `$`
+    if (name.contains(RegExp(r'[^a-zA-Z_$\d]'))) {
       return false;
     }
-    // Dart method name must start with lower case character
+    // Dart getter and method name should start with lower case character
     if (name[0].contains(RegExp(r'[A-Z]'))) {
       return false;
     }
-    // Dart class name cannot start with a number
+    // Dart getter and method name cannot start with a number
     if (name[0].contains(RegExp(r'\d'))) {
       return false;
     }
@@ -874,6 +876,7 @@ class LocalizationsGenerator {
     _allMessages = _templateBundle.resourceIds.map((String id) => Message(
        _templateBundle, _allBundles, id, areResourceAttributesRequired, useEscaping: useEscaping, logger: logger,
     )).toList();
+    hadErrors = _allMessages.any((Message message) => message.hadErrors);
     if (inputsAndOutputsListFile != null) {
       _inputFileList.addAll(_allBundles.bundles.map((AppResourceBundle bundle) {
         return bundle.file.absolute.path;
@@ -912,16 +915,19 @@ class LocalizationsGenerator {
     final LocaleInfo locale,
   ) {
     final Iterable<String> methods = _allMessages.map((Message message) {
+      LocaleInfo localeWithFallback = locale;
       if (message.messages[locale] == null) {
         _addUnimplementedMessage(locale, message.resourceId);
-        return _generateMethod(
-          message,
-          _templateArbLocale,
-        );
+        localeWithFallback = _templateArbLocale;
+      }
+      if (message.parsedMessages[localeWithFallback] == null) {
+        // The message exists, but parsedMessages[locale] is null due to a syntax error.
+        // This means that we have already set hadErrors = true while constructing the Message.
+        return '';
       }
       return _generateMethod(
         message,
-        locale,
+        localeWithFallback,
       );
     });
 
@@ -950,7 +956,7 @@ class LocalizationsGenerator {
       });
 
     final Iterable<String> methods = _allMessages
-      .where((Message message) => message.messages[locale] != null)
+      .where((Message message) => message.parsedMessages[locale] != null)
       .map((Message message) => _generateMethod(message, locale));
 
     return subclassTemplate
@@ -1100,8 +1106,13 @@ class LocalizationsGenerator {
 
       final String translationForMessage = message.messages[locale]!;
       final Node node = message.parsedMessages[locale]!;
+<<<<<<< HEAD
       // If parse tree is only a string, then return a getter method.
       if (node.children.every((Node child) => child.type == ST.string)) {
+=======
+      // If the placeholders list is empty, then return a getter method.
+      if (message.placeholders.isEmpty) {
+>>>>>>> 682aa387cfe4fbd71ccd5418b2c2a075729a1c66
         // Use the parsed translation to handle escaping with the same behavior.
         return getterTemplate
           .replaceAll('@(name)', message.resourceId)
